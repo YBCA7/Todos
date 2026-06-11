@@ -3,24 +3,24 @@
 
 """
 待办事项程序 - 支持任务栏进度条、标记未完成、每日自动清空
-依赖：PyQt6 (需安装：pip install PyQt6)
+依赖：PyQt5 (需安装：pip install PyQt5)
 """
 
 import json
 import os
 import sys
 from datetime import date
-from PyQt6.QtWidgets import (
+from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QListWidgetItem, QLineEdit, QPushButton, QProgressBar,
     QLabel, QMessageBox, QInputDialog
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QFont
 
 # 尝试导入任务栏进度条支持（仅 Windows）
 try:
-    from PyQt6.QtWinExtras import QWinTaskbarButton
+    from PyQt5.QtWinExtras import QWinTaskbarButton
     WINDOWS_TASKBAR = True
 except ImportError:
     WINDOWS_TASKBAR = False
@@ -35,13 +35,12 @@ class TodoApp(QMainWindow):
 
         # 加载数据
         self.data = self.load_data()
-        self.todos = self.data["todos"]  # 列表元素：{"text": str, "completed": bool}
+        self.todos = self.data["todos"]
 
         # 任务栏进度条对象（仅 Windows）
         self.taskbar_button = None
         if WINDOWS_TASKBAR:
             self.taskbar_button = QWinTaskbarButton(self)
-            self.taskbar_button.setWindow(self.windowHandle())
 
         # 创建界面
         self.init_ui()
@@ -50,9 +49,20 @@ class TodoApp(QMainWindow):
         self.refresh_todo_list()
         self.update_progress()
 
-        # 定时自动保存（可选，每次修改都会保存，故非必需）
-        # 窗口关闭时保存
-        self.destroyed.connect(self.save_data)
+        # 窗口关闭时保存（修复参数传递错误）
+        self.destroyed.connect(lambda: self.save_data())
+
+    def showEvent(self, event):
+        """重写窗口显示事件，在窗口句柄有效后再关联任务栏按钮"""
+        super().showEvent(event)
+        if WINDOWS_TASKBAR and self.taskbar_button is not None:
+            # 确保窗口句柄已创建
+            if self.windowHandle():
+                self.taskbar_button.setWindow(self.windowHandle())
+                # 确保任务栏进度条可见，并立即刷新一次
+                taskbar_progress = self.taskbar_button.progress()
+                taskbar_progress.setVisible(True)
+                self.update_progress()
 
     def load_data(self):
         """加载数据，若日期不是今天则清空待办"""
@@ -128,9 +138,7 @@ class TodoApp(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setTextVisible(True)
-        self.progress_label = QLabel("0%")
         progress_layout.addWidget(self.progress_bar)
-        progress_layout.addWidget(self.progress_label)
         main_layout.addLayout(progress_layout)
 
         # 状态栏
@@ -142,7 +150,7 @@ class TodoApp(QMainWindow):
         """刷新列表显示"""
         self.task_list.clear()
         for idx, task in enumerate(self.todos):
-            prefix = "✅ " if task["completed"] else "⭕ "
+            prefix = "✅ " if task["completed"] else "□ "
             text = prefix + task["text"]
             item = QListWidgetItem(text)
             if task["completed"]:
@@ -159,12 +167,20 @@ class TodoApp(QMainWindow):
             percent = int(completed / total * 100)
 
         self.progress_bar.setValue(percent)
-        self.progress_label.setText(f"{percent}%")
 
         # 更新 Windows 任务栏进度条
         if WINDOWS_TASKBAR and self.taskbar_button is not None:
-            self.taskbar_button.progress().setValue(percent)
-            self.taskbar_button.progress().setVisible(percent > 0)
+            # 如果尚未关联窗口（比如 showEvent 还没触发），则先尝试关联
+            if not self.windowHandle() or self.taskbar_button.window() is None:
+                # 延迟到 showEvent 中关联，这里不做重复关联
+                pass
+            else:
+                taskbar_progress = self.taskbar_button.progress()
+                taskbar_progress.setVisible(True)
+                taskbar_progress.setValue(percent)
+                # 可选：完成任务后隐藏进度条（取消下面注释）
+                # if percent == 100:
+                #     taskbar_progress.setVisible(False)
 
     def add_task(self):
         """添加新任务"""
@@ -202,7 +218,7 @@ class TodoApp(QMainWindow):
         self.status_label.setText(f"已完成：{self.todos[idx]['text']}")
 
     def mark_incomplete(self):
-        """标记选中任务为未完成（新增功能）"""
+        """标记选中任务为未完成"""
         idx = self.get_selected_index()
         if idx is None:
             return
