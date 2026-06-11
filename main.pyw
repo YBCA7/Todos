@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
-图形化待办事项程序 - 支持进度条显示与每日自动清空
+图形化待办事项程序 - 支持进度条显示、每日自动清空、编辑任务
 依赖：Python 3 + tkinter (标准库)
 """
 
 import json
 import os
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 from datetime import date
 
 DATA_FILE = "todos.json"
@@ -99,6 +99,9 @@ class TodoApp:
         complete_btn = ttk.Button(btn_frame, text="✅ 标记完成", command=self.complete_task)
         complete_btn.pack(side=tk.LEFT, padx=5)
 
+        edit_btn = ttk.Button(btn_frame, text="✏️ 编辑任务", command=self.edit_task)
+        edit_btn.pack(side=tk.LEFT, padx=5)
+
         delete_btn = ttk.Button(btn_frame, text="🗑 删除任务", command=self.delete_task)
         delete_btn.pack(side=tk.LEFT, padx=5)
 
@@ -125,12 +128,9 @@ class TodoApp:
         """刷新任务列表显示"""
         self.task_listbox.delete(0, tk.END)
         for task in self.todos:
-            # 显示前缀：✅ 已完成，⭕ 未完成
             prefix = "✅ " if task["completed"] else "⭕ "
             display_text = prefix + task["text"]
             self.task_listbox.insert(tk.END, display_text)
-            # 可选：为已完成任务设置不同颜色（仅对支持的环境有效）
-            # 这里简单改变前景色（部分系统可能不支持）
             if task["completed"]:
                 self.task_listbox.itemconfig(tk.END, fg="gray")
 
@@ -175,6 +175,29 @@ class TodoApp:
         self.update_progress()
         self.save_data()
         self.status_var.set(f"已完成：{self.todos[idx]['text']}")
+
+    def edit_task(self):
+        """编辑选中任务的文字内容"""
+        selection = self.task_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("提示", "请先选择一个任务")
+            return
+        idx = selection[0]
+        old_text = self.todos[idx]["text"]
+        new_text = simpledialog.askstring(
+            "编辑任务",
+            f"修改任务内容：",
+            initialvalue=old_text,
+            parent=self.root
+        )
+        # 用户取消或输入为空则放弃修改
+        if new_text is None or new_text.strip() == "":
+            return
+        new_text = new_text.strip()
+        self.todos[idx]["text"] = new_text
+        self.refresh_list()
+        self.save_data()
+        self.status_var.set(f"已编辑任务：{old_text} -> {new_text}")
 
     def delete_task(self):
         """删除选中任务"""
