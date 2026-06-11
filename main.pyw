@@ -2,38 +2,57 @@
 # -*- coding: utf-8 -*-
 
 """
-图形化待办事项程序 - 支持进度条显示、每日自动清空、编辑任务
-依赖：Python 3 + tkinter (标准库)
+待办事项程序 - 支持任务栏进度条、标记未完成、每日自动清空
+依赖：PyQt6 (需安装：pip install PyQt6)
 """
 
 import json
 import os
-import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+import sys
 from datetime import date
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QListWidget, QListWidgetItem, QLineEdit, QPushButton, QProgressBar,
+    QLabel, QMessageBox, QInputDialog
+)
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont
+
+# 尝试导入任务栏进度条支持（仅 Windows）
+try:
+    from PyQt6.QtWinExtras import QWinTaskbarButton
+    WINDOWS_TASKBAR = True
+except ImportError:
+    WINDOWS_TASKBAR = False
 
 DATA_FILE = "todos.json"
 
-class TodoApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("每日待办事项")
-        self.root.geometry("500x500")
-        self.root.resizable(True, True)
+class TodoApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("每日待办事项")
+        self.setMinimumSize(500, 500)
 
-        # 加载数据（会自动处理每日清空）
+        # 加载数据
         self.data = self.load_data()
-        self.todos = self.data["todos"]
+        self.todos = self.data["todos"]  # 列表元素：{"text": str, "completed": bool}
 
-        # 创建界面组件
-        self.create_widgets()
+        # 任务栏进度条对象（仅 Windows）
+        self.taskbar_button = None
+        if WINDOWS_TASKBAR:
+            self.taskbar_button = QWinTaskbarButton(self)
+            self.taskbar_button.setWindow(self.windowHandle())
 
-        # 刷新任务列表和进度条
-        self.refresh_list()
+        # 创建界面
+        self.init_ui()
+
+        # 刷新列表和进度
+        self.refresh_todo_list()
         self.update_progress()
 
-        # 窗口关闭时保存数据
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        # 定时自动保存（可选，每次修改都会保存，故非必需）
+        # 窗口关闭时保存
+        self.destroyed.connect(self.save_data)
 
     def load_data(self):
         """加载数据，若日期不是今天则清空待办"""
@@ -47,7 +66,6 @@ class TodoApp:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, IOError):
-            print("数据文件损坏，使用空数据")
             return default_data
 
         if data.get("date") != today:
@@ -55,7 +73,6 @@ class TodoApp:
             data["date"] = today
             data["todos"] = []
             self.save_data(data)
-
         return data
 
     def save_data(self, data=None):
@@ -66,163 +83,172 @@ class TodoApp:
             with open(DATA_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except IOError as e:
-            messagebox.showerror("保存失败", f"无法保存数据：{e}")
+            QMessageBox.critical(self, "保存失败", f"无法保存数据：{e}")
 
-    def create_widgets(self):
-        """创建所有界面组件"""
-        # 顶部：添加任务区域
-        add_frame = ttk.Frame(self.root, padding=5)
-        add_frame.pack(fill=tk.X, pady=5)
+    def init_ui(self):
+        """构建界面"""
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
 
-        self.task_entry = ttk.Entry(add_frame)
-        self.task_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        self.task_entry.bind("<Return>", lambda e: self.add_task())
+        # 添加任务区域
+        add_layout = QHBoxLayout()
+        self.task_input = QLineEdit()
+        self.task_input.setPlaceholderText("输入新任务...")
+        self.task_input.returnPressed.connect(self.add_task)
+        add_btn = QPushButton("添加任务")
+        add_btn.clicked.connect(self.add_task)
+        add_layout.addWidget(self.task_input)
+        add_layout.addWidget(add_btn)
+        main_layout.addLayout(add_layout)
 
-        add_btn = ttk.Button(add_frame, text="添加任务", command=self.add_task)
-        add_btn.pack(side=tk.RIGHT)
+        # 任务列表
+        self.task_list = QListWidget()
+        self.task_list.setFont(QFont("微软雅黑", 10))
+        main_layout.addWidget(self.task_list)
 
-        # 中间：任务列表（Listbox + 滚动条）
-        list_frame = ttk.Frame(self.root, padding=5)
-        list_frame.pack(fill=tk.BOTH, expand=True)
+        # 按钮区域
+        btn_layout = QHBoxLayout()
+        complete_btn = QPushButton("✅ 标记完成")
+        complete_btn.clicked.connect(self.mark_complete)
+        incomplete_btn = QPushButton("🔄 标记未完成")
+        incomplete_btn.clicked.connect(self.mark_incomplete)
+        edit_btn = QPushButton("✏️ 编辑任务")
+        edit_btn.clicked.connect(self.edit_task)
+        delete_btn = QPushButton("🗑 删除任务")
+        delete_btn.clicked.connect(self.delete_task)
+        btn_layout.addWidget(complete_btn)
+        btn_layout.addWidget(incomplete_btn)
+        btn_layout.addWidget(edit_btn)
+        btn_layout.addWidget(delete_btn)
+        main_layout.addLayout(btn_layout)
 
-        self.task_listbox = tk.Listbox(list_frame, height=15, font=("微软雅黑", 10))
-        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.task_listbox.yview)
-        self.task_listbox.configure(yscrollcommand=scrollbar.set)
+        # 进度条和百分比
+        progress_layout = QHBoxLayout()
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setTextVisible(True)
+        self.progress_label = QLabel("0%")
+        progress_layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.progress_label)
+        main_layout.addLayout(progress_layout)
 
-        self.task_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # 状态栏
+        self.status_label = QLabel("就绪")
+        self.status_label.setFrameStyle(QLabel.Shape.Box | QLabel.Shadow.Sunken)
+        main_layout.addWidget(self.status_label)
 
-        # 底部按钮区域
-        btn_frame = ttk.Frame(self.root, padding=5)
-        btn_frame.pack(fill=tk.X)
-
-        complete_btn = ttk.Button(btn_frame, text="✅ 标记完成", command=self.complete_task)
-        complete_btn.pack(side=tk.LEFT, padx=5)
-
-        edit_btn = ttk.Button(btn_frame, text="✏️ 编辑任务", command=self.edit_task)
-        edit_btn.pack(side=tk.LEFT, padx=5)
-
-        delete_btn = ttk.Button(btn_frame, text="🗑 删除任务", command=self.delete_task)
-        delete_btn.pack(side=tk.LEFT, padx=5)
-
-        # 进度条区域
-        progress_frame = ttk.Frame(self.root, padding=5)
-        progress_frame.pack(fill=tk.X, pady=5)
-
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(
-            progress_frame, variable=self.progress_var, maximum=100, length=300
-        )
-        self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
-
-        self.percent_label = ttk.Label(progress_frame, text="0%")
-        self.percent_label.pack(side=tk.RIGHT)
-
-        # 底部状态栏
-        self.status_var = tk.StringVar()
-        self.status_var.set("就绪")
-        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-
-    def refresh_list(self):
-        """刷新任务列表显示"""
-        self.task_listbox.delete(0, tk.END)
-        for task in self.todos:
+    def refresh_todo_list(self):
+        """刷新列表显示"""
+        self.task_list.clear()
+        for idx, task in enumerate(self.todos):
             prefix = "✅ " if task["completed"] else "⭕ "
-            display_text = prefix + task["text"]
-            self.task_listbox.insert(tk.END, display_text)
+            text = prefix + task["text"]
+            item = QListWidgetItem(text)
             if task["completed"]:
-                self.task_listbox.itemconfig(tk.END, fg="gray")
+                item.setForeground(Qt.GlobalColor.gray)
+            self.task_list.addItem(item)
 
     def update_progress(self):
-        """更新进度条和百分比显示"""
+        """更新进度条和任务栏进度"""
         total = len(self.todos)
         if total == 0:
-            self.progress_var.set(0)
-            self.percent_label.config(text="0%")
-            return
+            percent = 0
+        else:
+            completed = sum(1 for t in self.todos if t["completed"])
+            percent = int(completed / total * 100)
 
-        completed = sum(1 for t in self.todos if t["completed"])
-        percent = (completed / total) * 100
-        self.progress_var.set(percent)
-        self.percent_label.config(text=f"{percent:.1f}%")
+        self.progress_bar.setValue(percent)
+        self.progress_label.setText(f"{percent}%")
+
+        # 更新 Windows 任务栏进度条
+        if WINDOWS_TASKBAR and self.taskbar_button is not None:
+            self.taskbar_button.progress().setValue(percent)
+            self.taskbar_button.progress().setVisible(percent > 0)
 
     def add_task(self):
         """添加新任务"""
-        text = self.task_entry.get().strip()
+        text = self.task_input.text().strip()
         if not text:
-            messagebox.showwarning("提示", "任务内容不能为空！")
+            QMessageBox.warning(self, "提示", "任务内容不能为空！")
             return
         self.todos.append({"text": text, "completed": False})
-        self.task_entry.delete(0, tk.END)
-        self.refresh_list()
+        self.task_input.clear()
+        self.refresh_todo_list()
         self.update_progress()
         self.save_data()
-        self.status_var.set(f"已添加任务：{text}")
+        self.status_label.setText(f"已添加任务：{text}")
 
-    def complete_task(self):
+    def get_selected_index(self):
+        """获取当前选中的任务索引"""
+        selected = self.task_list.currentRow()
+        if selected < 0:
+            QMessageBox.information(self, "提示", "请先选择一个任务")
+            return None
+        return selected
+
+    def mark_complete(self):
         """标记选中任务为已完成"""
-        selection = self.task_listbox.curselection()
-        if not selection:
-            messagebox.showinfo("提示", "请先选择一个任务")
+        idx = self.get_selected_index()
+        if idx is None:
             return
-        idx = selection[0]
         if self.todos[idx]["completed"]:
-            messagebox.showinfo("提示", "该任务已经是完成状态")
+            QMessageBox.information(self, "提示", "该任务已经是完成状态")
             return
         self.todos[idx]["completed"] = True
-        self.refresh_list()
+        self.refresh_todo_list()
         self.update_progress()
         self.save_data()
-        self.status_var.set(f"已完成：{self.todos[idx]['text']}")
+        self.status_label.setText(f"已完成：{self.todos[idx]['text']}")
+
+    def mark_incomplete(self):
+        """标记选中任务为未完成（新增功能）"""
+        idx = self.get_selected_index()
+        if idx is None:
+            return
+        if not self.todos[idx]["completed"]:
+            QMessageBox.information(self, "提示", "该任务已经是未完成状态")
+            return
+        self.todos[idx]["completed"] = False
+        self.refresh_todo_list()
+        self.update_progress()
+        self.save_data()
+        self.status_label.setText(f"已恢复为未完成：{self.todos[idx]['text']}")
 
     def edit_task(self):
-        """编辑选中任务的文字内容"""
-        selection = self.task_listbox.curselection()
-        if not selection:
-            messagebox.showinfo("提示", "请先选择一个任务")
+        """编辑任务内容"""
+        idx = self.get_selected_index()
+        if idx is None:
             return
-        idx = selection[0]
         old_text = self.todos[idx]["text"]
-        new_text = simpledialog.askstring(
-            "编辑任务",
-            f"修改任务内容：",
-            initialvalue=old_text,
-            parent=self.root
-        )
-        # 用户取消或输入为空则放弃修改
-        if new_text is None or new_text.strip() == "":
-            return
-        new_text = new_text.strip()
-        self.todos[idx]["text"] = new_text
-        self.refresh_list()
-        self.save_data()
-        self.status_var.set(f"已编辑任务：{old_text} -> {new_text}")
+        new_text, ok = QInputDialog.getText(self, "编辑任务", "修改任务内容：", text=old_text)
+        if ok and new_text.strip():
+            new_text = new_text.strip()
+            self.todos[idx]["text"] = new_text
+            self.refresh_todo_list()
+            self.save_data()
+            self.status_label.setText(f"已编辑：{old_text} -> {new_text}")
 
     def delete_task(self):
-        """删除选中任务"""
-        selection = self.task_listbox.curselection()
-        if not selection:
-            messagebox.showinfo("提示", "请先选择一个任务")
+        """删除任务"""
+        idx = self.get_selected_index()
+        if idx is None:
             return
-        idx = selection[0]
         task_text = self.todos[idx]["text"]
-        if messagebox.askyesno("确认删除", f"确定要删除任务「{task_text}」吗？"):
+        reply = QMessageBox.question(self, "确认删除", f"确定要删除任务「{task_text}」吗？",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
             del self.todos[idx]
-            self.refresh_list()
+            self.refresh_todo_list()
             self.update_progress()
             self.save_data()
-            self.status_var.set(f"已删除任务：{task_text}")
-
-    def on_closing(self):
-        """窗口关闭时保存数据并退出"""
-        self.save_data()
-        self.root.destroy()
+            self.status_label.setText(f"已删除任务：{task_text}")
 
 def main():
-    root = tk.Tk()
-    app = TodoApp(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    window = TodoApp()
+    window.show()
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()
