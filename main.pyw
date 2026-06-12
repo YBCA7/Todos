@@ -114,7 +114,6 @@ class TodoApp(QMainWindow):
 
         # 任务列表
         self.task_list = QListWidget()
-        self.task_list.setFont(QFont("微软雅黑", 10))
         main_layout.addWidget(self.task_list)
 
         # 按钮区域
@@ -262,6 +261,7 @@ class TodoApp(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    app.setFont(QFont("微软雅黑", 10))
     window = TodoApp()
     window.show()
     sys.exit(app.exec())
