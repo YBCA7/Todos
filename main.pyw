@@ -30,7 +30,7 @@ class TodoApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("待办事项")
-        self.setMinimumSize(500, 500)
+        self.setMinimumSize(480, 220)
 
         # 加载数据（直接是任务列表）
         self.todos = self.load_data()
@@ -105,6 +105,7 @@ class TodoApp(QMainWindow):
         # 任务列表（支持多选）
         self.task_list = QListWidget()
         self.task_list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        self.task_list.setFont(QFont("微软雅黑", 13))
         main_layout.addWidget(self.task_list)
 
         # 按钮区域
@@ -133,7 +134,7 @@ class TodoApp(QMainWindow):
         main_layout.addWidget(self.progress_bar)
 
         # 状态栏
-        self.status_label = QLabel("就绪")
+        self.status_label = QLabel()
         self.status_label.setFrameStyle(QLabel.Shape.Box | QLabel.Shadow.Sunken)
         main_layout.addWidget(self.status_label)
 
