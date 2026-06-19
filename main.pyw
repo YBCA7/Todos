@@ -3,23 +3,23 @@
 
 """
 待办事项程序 - 支持任务栏进度条、标记未完成、清空所有任务、批量操作
-依赖：PyQt5 (需安装：pip install PyQt5)
+依赖：PySide6 (需安装：pip install PySide6)
 """
 
 import json
 import os
 import sys
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QListWidgetItem, QLineEdit, QPushButton, QProgressBar,
     QLabel, QMessageBox, QInputDialog, QAbstractItemView
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 
 # 尝试导入任务栏进度条支持（仅 Windows）
 try:
-    from PyQt5.QtWinExtras import QWinTaskbarButton
+    from PySide6.QtWinExtras import QWinTaskbarButton
     WINDOWS_TASKBAR = True
 except ImportError:
     WINDOWS_TASKBAR = False
